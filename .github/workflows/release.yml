@@ -98,14 +98,12 @@ jobs:
             --title "Shield·Code $GITHUB_REF_NAME"
 
   publish:
-    # Runs only when store tokens are configured (repo Settings > Secrets > Actions: OVSX_PAT).
-    # VS Code Marketplace uses trusted publishing (no VSCE_PAT needed).
+    # Runs only when store tokens are configured (repo Settings > Secrets > Actions: OVSX_PAT, VSCE_PAT).
     needs: release
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     env:
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -120,5 +118,6 @@ jobs:
         run: |
           set -e
           for f in *.vsix; do npx --yes ovsx@0.10.6 publish "$f" -p "$OVSX_PAT" --skip-duplicate; done
-      - name: VS Code Marketplace (trusted publishing)
-        run: for f in *.vsix; do npx --yes @vscode/vsce@4.0.0 publish --packagePath "$f"; done
+      - name: VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        run: for f in *.vsix; do npx --yes @vscode/vsce@4.0.0 publish --packagePath "$f" -p "$VSCE_PAT"; done
