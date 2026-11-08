@@ -18,13 +18,13 @@ The original Streamlit demo (`app.py`) still runs (`streamlit run app.py`) for t
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .                                  # installs shield package + all dependencies
 brew install tesseract poppler                    # OCR + pdftotext (used by verification)
 bash scripts/get_models.sh                        # YuNet/SFace ONNX models (face *region* detection)
 cp .env.example .env                              # optional: fill in only what you use (git-ignored, read at server start)
 
 (cd web && npm ci && npm run build)               # web UI, served by the API from web/dist
-PYTHONPATH=$PWD python -m shield.api              # http://127.0.0.1:8000  (API docs: /docs)
+python -m shield.api                              # http://127.0.0.1:8000  (API docs: /docs)
 ```
 
 Development UI with hot reload: `cd web && npm run dev` (http://localhost:5173, proxies `/api` to port 8000).
