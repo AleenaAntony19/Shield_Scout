@@ -123,7 +123,7 @@ jobs:
       - name: Check the listing
         if: env.OVSX_PAT != ''
         run: |
-          sleep 30
+          sleep 60
           version="${GITHUB_REF_NAME#v}"
           curl -fsS "https://open-vsx.org/api/aaron43210/shield-code/$version" | jq -e --arg v "$version" '.version == $v'
       - name: VS Code Marketplace (trusted publishing)
