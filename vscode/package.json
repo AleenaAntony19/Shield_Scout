@@ -2,7 +2,7 @@
   "name": "shield-code",
   "displayName": "Shield\u00b7Code",
   "description": "Scan a workspace for secrets, Indian PII, unsafe code, risky config and sensitive images/documents; review and apply safe fixes with a preview.",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "publisher": "aaron43210",
   "license": "AGPL-3.0-only",
   "icon": "media/icon.png",
