@@ -117,8 +117,8 @@ export function resolveEngine(
 export function explainStartFailure(message: string, platform: string): string {
   if (/Microsoft Store|ENOENT|not found|not recognized/i.test(message)) {
     return platform === "win32"
-      ? "Python was not found. Install the Windows build of Shield·Code (it bundles the engine), or install Python 3.11 and set shieldCode.pythonPath to python.exe."
-      : "Python was not found. Install the platform build of Shield·Code (bundled engine), or set shieldCode.pythonPath.";
+      ? "Python was not found. Install the Windows build of Shield Code (it bundles the engine), or install Python 3.11 and set shieldCode.pythonPath to python.exe."
+      : "Python was not found. Install the platform build of Shield Code (bundled engine), or set shieldCode.pythonPath.";
   }
   return message;
 }

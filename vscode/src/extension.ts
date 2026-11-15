@@ -261,7 +261,7 @@ async function explain(f: Finding, ctx: vscode.ExtensionContext) {
 // ---------- activation ----------
 export function activate(ctx: vscode.ExtensionContext): { lastError: () => string } {
   setExtensionRoot(ctx.extensionPath); // locates the bundled engine in platform builds
-  output = vscode.window.createOutputChannel("Shield·Code");
+  output = vscode.window.createOutputChannel("Shield Code");
   diagnostics = vscode.languages.createDiagnosticCollection("shield");
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   status.command = "shieldCode.scanWorkspace";

@@ -34,7 +34,7 @@ def to_sarif(scan: dict) -> dict:
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [
             {
-                "tool": {"driver": {"name": "Shield·Code", "rules": list(rules.values())}},
+                "tool": {"driver": {"name": "Shield Code", "rules": list(rules.values())}},
                 "results": results,
             }
         ],
@@ -43,7 +43,7 @@ def to_sarif(scan: dict) -> dict:
 
 def to_markdown(scan: dict) -> str:
     counts = Counter((f["engine"], f["severity"]) for f in scan["findings"])
-    lines = ["# Shield·Code report", "", "| Engine | Critical | High | Medium | Low |", "|---|---:|---:|---:|---:|"]
+    lines = ["# Shield Code report", "", "| Engine | Critical | High | Medium | Low |", "|---|---:|---:|---:|---:|"]
     for engine in sorted({e for e, _ in counts}):
         lines.append(
             f"| {engine} | {counts[(engine,'critical')]} | {counts[(engine,'high')]} | "

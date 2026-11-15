@@ -2,6 +2,10 @@
 
 One version number covers the engine, the API, the web app and the VS Code extension. The extension's own notes are in [vscode/CHANGELOG.md](vscode/CHANGELOG.md).
 
+## 1.0.1
+
+- The VS Code extension is renamed from "Shield·Code" to **Shield Code**, with a plain space. Its ID `aaron43210.shield-code` is unchanged. The SARIF and Markdown reports use the new name. No other changes.
+
 ## 1.0.0
 
 First stable release.

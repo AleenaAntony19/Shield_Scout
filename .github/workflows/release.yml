@@ -95,7 +95,7 @@ jobs:
         run: |
           sha256sum *.vsix > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" *.vsix SHA256SUMS --repo "$GITHUB_REPOSITORY" --generate-notes \
-            --title "Shield·Code $GITHUB_REF_NAME"
+            --title "Shield Code $GITHUB_REF_NAME"
 
   publish:
     # Runs only when store tokens are configured (repo Settings > Secrets > Actions: OVSX_PAT, VSCE_PAT).
