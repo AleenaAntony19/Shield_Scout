@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0
+First stable release. One version number now covers the extension, its bundled engine, the web app and the API.
+- **Shield: Run AI Agent Swarm on Workspace (MCP)** now appears in the Command Palette.
+- Windows: saving a file no longer leaves its old findings in the list.
+- SARIF export reports a failed scan instead of saying the file was written.
+- The agent swarm log shows the notes agents send each other.
+- Default AI models come from the engine, so a retired model name cannot linger in the extension.
+
 ## 0.5.2
 - Fix README images on the store pages.
 - License: AGPL-3.0.

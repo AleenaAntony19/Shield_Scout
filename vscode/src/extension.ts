@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
-  FILE_SCOPED, FIX_TITLES, applyEdits, atLeast, debounce, describe, findingRange, parseScan, scanArgs,
+  FILE_SCOPED, FIX_TITLES, applyEdits, atLeast, debounce, describe, findingRange, parseScan, posixPath, scanArgs,
   type Finding, type FixPlan, type ScanResult, type Severity,
 } from "./core.ts";
 import { RunError, runPython, setExtensionRoot } from "./runner.ts";
@@ -285,7 +285,7 @@ export function activate(ctx: vscode.ExtensionContext): { lastError: () => strin
       const doc = vscode.window.activeTextEditor?.document;
       const folder = doc && vscode.workspace.getWorkspaceFolder(doc.uri);
       if (!doc || !folder) return;
-      await scan(folder.uri.fsPath, tree, [path.relative(folder.uri.fsPath, doc.uri.fsPath)]).catch(report);
+      await scan(folder.uri.fsPath, tree, [posixPath(path.relative(folder.uri.fsPath, doc.uri.fsPath))]).catch(report);
     }),
 
     vscode.commands.registerCommand("shieldCode.revealFinding", async (root: string, f: Finding) => {
@@ -327,6 +327,8 @@ export function activate(ctx: vscode.ExtensionContext): { lastError: () => strin
           output.appendLine(`\n[agent swarm] clean=${res.clean} cycles=${res.cycles} llm_calls=${res.llm_calls} tool_calls=${res.tool_calls} tokens=${res.tokens}`);
           for (const a of (res.agents as { name: string; steps: number; tokens: number; tools: string[]; error: string }[]) ?? [])
             output.appendLine(`  ${a.name}: ${a.steps} steps, ${a.tokens} tok, tools [${a.tools.join(", ")}] ${a.error}`);
+          for (const m of (res.messages as { from: string; to: string; text: string }[]) ?? [])
+            output.appendLine(`  note ${m.from} → ${m.to}: ${m.text}`);
           for (const d of (res.decisions as { finding_id: string; action: string; reason: string }[]) ?? [])
             output.appendLine(`  decision ${d.finding_id}: ${d.action} (${d.reason})`);
           output.show(true);
@@ -345,7 +347,10 @@ export function activate(ctx: vscode.ExtensionContext): { lastError: () => strin
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Shield: exporting SARIF", cancellable: true }, (_p, token) => {
         const args = scanArgs(root, s);
         args[args.indexOf("--format") + 1] = "sarif";
-        return runPython([...args, "--out", target.fsPath], { cwd: root, token, timeoutMs: (s.timeout + 15) * 1000 });
+        return runPython([...args, "--out", target.fsPath], { cwd: root, token, timeoutMs: (s.timeout + 15) * 1000 }).then((res) => {
+          // 1 means "findings at high or above", still a written report; anything else wrote nothing
+          if (res.code !== 0 && res.code !== 1) throw new RunError(`SARIF export failed (exit ${res.code}): ${res.stderr.trim().split("\n").pop() ?? ""}`);
+        });
       },
       ).then(() => vscode.window.showInformationMessage(`Shield: SARIF written to ${target.fsPath}`), report);
     }),
@@ -379,7 +384,7 @@ export function activate(ctx: vscode.ExtensionContext): { lastError: () => strin
   const onSave = debounce((doc: vscode.TextDocument) => {
     const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
     if (!folder || !settings().scanOnSave || !results.has(folder.uri.fsPath)) return; // only after a first full scan
-    scan(folder.uri.fsPath, tree, [path.relative(folder.uri.fsPath, doc.uri.fsPath)]).catch(report);
+    scan(folder.uri.fsPath, tree, [posixPath(path.relative(folder.uri.fsPath, doc.uri.fsPath))]).catch(report);
   }, 1000);
   ctx.subscriptions.push(vscode.workspace.onDidSaveTextDocument(onSave));
   return { lastError: () => lastError }; // used by the integration test

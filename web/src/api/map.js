@@ -95,7 +95,15 @@ export function applyAgentEvent(s, ev) {
       ensureEdge(s, me, `agent_${ev.child}`, 'SPAWNED')
       addLog(s, `[${ev.agent}] spawned ${ev.child}`, 'info', (ev.ts || 0) * 1000 || undefined)
       break
+    case 'message': // one agent wrote to another: the text is already masked by the server
+      if (ev.to !== 'all') {
+        agentCard(s, ev.to)
+        ensureEdge(s, me, `agent_${ev.to}`, 'TELLS')
+      }
+      addLog(s, `[${ev.agent} → ${ev.to}] ${ev.text}`, 'info', (ev.ts || 0) * 1000 || undefined)
+      break
     case 'tool': {
+      if (ev.action === 'message_agent') break // shown by its own message event, and it is not an MCP tool
       const tool = `tool_${ev.action}`
       ensureNode(s, tool, ev.action, 'MCP tool')
       ensureEdge(s, me, tool, 'CALLS')
@@ -189,6 +197,16 @@ export function applyScoutEvent(s, ev) {
     ensureNode(s, id, ev.site, 'Agent', 'Code agent for one site. Runs in parallel with the others and spends no AI tokens.', { status: ev.status, pages: ev.pages ?? 0, images: ev.images ?? 0 })
     ensureEdge(s, hub, id, 'SPAWNED')
     addLog(s, `[Site agent] ${ev.site} ${ev.status}${ev.status === 'done' ? `: ${ev.pages ?? 0} page(s), ${ev.images ?? 0} image(s)` : ''}`, 'info', when)
+    return
+  }
+  if (ev.kind === 'handoff') {
+    for (const name of [ev.from, ev.to]) ensureNode(s, `siteagent_${name}`, name, 'Agent', 'Code agent for one site. Runs in parallel with the others and spends no AI tokens.')
+    ensureEdge(s, `siteagent_${ev.from}`, `siteagent_${ev.to}`, 'TELLS')
+    addLog(s, `[Site agent] ${ev.from} → ${ev.to}: found a link into your site, ${ev.url}`, 'info', when)
+    return
+  }
+  if (ev.kind === 'sitemap') {
+    addLog(s, `[Crawl] the sitemap of ${ev.url} lists ${ev.found} page(s)`, 'info', when)
     return
   }
   if (!ev.url) return

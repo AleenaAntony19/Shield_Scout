@@ -81,7 +81,7 @@
             </select>
           </label>
           <label class="mono grow">MODEL (EMPTY = DEFAULT)
-            <input class="field mono" v-model="form.model" :placeholder="llm?.model || ''" />
+            <input class="field mono" v-model="form.model" :placeholder="config.value?.llm_models?.[form.provider] || ''" />
           </label>
           <label class="mono grow">YOUR API KEY (kept in this tab only)
             <input class="field mono" type="password" autocomplete="off" v-model.trim="form.key" :placeholder="ai.key ? 'key set; leave empty to keep it' : llm?.key_set ? 'optional: this server has a key' : 'paste key'" />

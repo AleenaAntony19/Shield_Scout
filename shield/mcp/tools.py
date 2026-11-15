@@ -54,6 +54,9 @@ class Session:
     last_attack: dict | None = None  # ground truth from the latest penetration test
     kind: str = "document"
     code_findings: dict[str, dict] = field(default_factory=dict)  # workspace sessions: codescan findings by id
+    board: list[dict] = field(default_factory=list)  # notes agents send each other: {from, to, text}, text masked
+    roster: set[str] = field(default_factory=set)  # agent names a note may be addressed to
+    cursor: dict[str, int] = field(default_factory=dict)  # per agent: how far down the board it has read
     on_tool: Callable[[str, dict, dict], None] | None = None  # audit hook (ledger)
     on_stage: Callable[[str, dict], None] | None = None  # job-graph hook
 

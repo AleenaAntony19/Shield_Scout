@@ -40,7 +40,11 @@ def main() -> int:
         sys.argv = ["bandit", *args[1:]]
         return bandit_main()
     if mode == "--version":
-        print("shield-engine 0.4.0")
+        import json
+
+        # the engine ships inside the extension, so it reports the extension's version (build.py bundles package.json)
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent / "vscode"))
+        print("shield-engine", json.loads((base / "package.json").read_text(encoding="utf-8"))["version"])
         return 0
     from shield.codescan.__main__ import main as scan_main
 

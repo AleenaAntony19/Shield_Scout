@@ -101,3 +101,19 @@ test('deliberation groups turns per entity; the report only states what happened
   assert.equal(s.deliberationLogs[0].verdict, 'confirmed')
   assert.deepEqual(buildReport(s).map((x) => x.title), ['Document findings'])
 })
+
+test('agents writing to each other show as TELLS edges and log lines', () => {
+  const s = state()
+  applyAgentEvent(s, { agent: 'StatutoryAuditor', event: 'tool', action: 'message_agent', observation: '{}' })
+  applyAgentEvent(s, { agent: 'StatutoryAuditor', event: 'message', to: 'PragmaticDev', text: 'a1 passes Verhoeff' })
+  applyAgentEvent(s, { agent: 'PragmaticDev', event: 'message', to: 'all', text: 'layer two unreadable' })
+  assert.ok(s.graphData.edges.some((e) => e.uuid === 'agent_StatutoryAuditor->agent_PragmaticDev:TELLS'))
+  assert.ok(!s.graphData.nodes.some((n) => n.uuid === 'tool_message_agent'), 'a note is not an MCP tool')
+  assert.deepEqual(s.systemLogs.map((l) => l.msg), ['[StatutoryAuditor → PragmaticDev] a1 passes Verhoeff', '[PragmaticDev → all] layer two unreadable'])
+
+  applyScoutEvent(s, { kind: 'handoff', from: 'forum@a.com', to: 'paste@b.com', url: 'https://b.com/x' })
+  applyScoutEvent(s, { kind: 'sitemap', url: 'https://a.com/', site: 'forum@a.com', found: 12 })
+  assert.ok(s.graphData.edges.some((e) => e.uuid === 'siteagent_forum@a.com->siteagent_paste@b.com:TELLS'))
+  assert.ok(s.graphData.nodes.some((n) => n.uuid === 'siteagent_paste@b.com'), 'an edge never points at a node that is missing')
+  assert.match(s.systemLogs.at(-1).msg, /lists 12 page/)
+})

@@ -2,18 +2,18 @@
   "name": "shield-code",
   "displayName": "Shield\u00b7Code",
   "description": "Scan a workspace for secrets, Indian PII, unsafe code, risky config and sensitive images/documents; review and apply safe fixes with a preview.",
-  "version": "0.5.7",
+  "version": "1.0.0",
   "publisher": "aaron43210",
   "license": "AGPL-3.0-only",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AleenaAntony19/TEAMCARTEL_VYUHAM26.git",
+    "url": "https://github.com/AleenaAntony19/Shield_Scout.git",
     "directory": "vscode"
   },
-  "homepage": "https://github.com/AleenaAntony19/TEAMCARTEL_VYUHAM26/tree/main/vscode#readme",
+  "homepage": "https://github.com/AleenaAntony19/Shield_Scout/tree/main/vscode#readme",
   "bugs": {
-    "url": "https://github.com/AleenaAntony19/TEAMCARTEL_VYUHAM26/issues"
+    "url": "https://github.com/AleenaAntony19/Shield_Scout/issues"
   },
   "keywords": [
     "security",
@@ -74,6 +74,10 @@
         "command": "shieldCode.deepScan",
         "title": "Shield: AI Deep Scan (asks before sending text)",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "shieldCode.runSwarm",
+        "title": "Shield: Run AI Agent Swarm on Workspace (MCP)"
       },
       {
         "command": "shieldCode.whyFlagged",

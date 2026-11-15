@@ -123,4 +123,9 @@ export function explainStartFailure(message: string, platform: string): string {
   return message;
 }
 
+/** The engine reports files with "/" on every OS; Windows paths must match before they are compared or merged. */
+export function posixPath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 export const RETIRED_MODELS = new Set(["claude-3-7-sonnet", "claude-3-5-haiku"]);

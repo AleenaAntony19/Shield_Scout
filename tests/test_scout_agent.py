@@ -425,3 +425,122 @@ def test_a_giant_image_is_counted_not_decoded(monkeypatch):
     monkeypatch.setattr(matcher_cv2, "imdecode", lambda *a: (_ for _ in ()).throw(AssertionError("must not decode")))
     m = Matcher([], pdq.HashBank())
     assert asyncio.run(m.on_image(ImageRef("p", "i", "d"), F())) is None and m.failed == 1
+
+
+class SiteFetcher:
+    """A small web held in a dict. Any other address is a dead link."""
+
+    def __init__(self, pages):
+        self.pages, self.calls = pages, []
+
+    async def get(self, url):
+        self.calls.append(url)
+        body = self.pages.get(url)
+        return FetchResult(404 if body is None else 200, {}, (body or "").encode(), url)
+
+
+def run_crawl(fetcher, seeds, **sched):
+    """seeds: (url, domain, depth). Returns counters, events and the image addresses handed to the matcher."""
+    async def go():
+        s, events, images = Scheduler(rps_per_domain=1000, **sched), [], []
+
+        async def on_event(ev):
+            events.append(ev)
+
+        async def on_image(ref):
+            images.append(ref.image_url)
+
+        for url, domain, depth in seeds:
+            s.push(1, 0.5, Job(url, "page", depth, domain))
+        return await s.run(fetcher, on_image, on_event, 10), events, images
+
+    return asyncio.run(go())
+
+
+def _site(pages=30):
+    """A seed with more links than the old 20-link limit, pages that link back, a frame, and a corner only the sitemap knows."""
+    a = "https://a.example"
+    links = "".join(f'<a href="/p{i}.html">p{i}</a>' for i in range(pages))
+    web = {
+        f"{a}/": f'<html>{links}<iframe src="/frame.html"></iframe><a href="#top">top</a><a href="mailto:x@a.example">m</a>'
+                 '<a href="/style.css">css</a><a href="/dead.html">dead</a><img src="/i/seed.jpg"></html>',
+        f"{a}/frame.html": "<html>frame</html>",
+        f"{a}/corner.html": '<html><img src="/i/corner.jpg"></html>',
+        f"{a}/robots.txt": f"User-agent: *\nSitemap: {a}/sm.xml\n",
+        f"{a}/sm.xml": f"<urlset><url><loc>{a}/corner.html</loc></url><url><loc>{a}/p0.html</loc></url><url><loc>https://stranger.example/x</loc></url></urlset>",
+    }
+    for i in range(pages):
+        web[f"{a}/p{i}.html"] = f'<html><a href="/">home</a><a href="/p{(i + 1) % pages}.html#c">next</a><img src="/i/{i}.jpg"></html>'
+    return a, web
+
+
+def test_every_page_of_a_site_is_read_exactly_once():
+    a, web = _site()
+    f = SiteFetcher(web)
+    counters, events, images = run_crawl(f, [(f"{a}/", "a.example", 0)])
+    pages = [u for u in f.calls if not u.endswith(("robots.txt", ".xml"))]
+    wanted = {f"{a}/", f"{a}/frame.html", f"{a}/corner.html", f"{a}/dead.html"} | {f"{a}/p{i}.html" for i in range(30)}
+    assert set(pages) == wanted, "every link, the frame and the sitemap-only corner; no stylesheet, mail link or other site"
+    assert len(pages) == len(wanted), "pages that link back to each other must not be fetched twice"
+    assert counters["pages"] == 33 and counters["pages_failed"] == 1 and counters["pages_found"] == 34
+    assert f"{a}/i/corner.jpg" in images and len(images) == 32
+    assert [e["found"] for e in events if e["kind"] == "sitemap"] == [3]
+    assert "timed_out" not in counters
+
+
+def test_the_page_budget_is_exact_and_the_report_shows_what_was_left():
+    a, web = _site()
+    counters, _, images = run_crawl(SiteFetcher(web), [(f"{a}/", "a.example", 0)], budget_pages=5)
+    assert counters["pages"] == 5 and counters["pages_found"] > 5
+    assert len(images) == 5, "the last page inside the budget still has its image checked"
+
+
+def test_a_site_agent_hands_a_link_to_the_agent_that_owns_that_site():
+    a, b = "https://a.example", "https://b.example"
+    web = {
+        f"{a}/": f'<html><a href="{b}/deep.html">b</a><a href="https://cdn.b.example/y.html">sub</a><a href="https://stranger.example/z">s</a></html>',
+        f"{b}/": "<html>b home</html>",
+        f"{b}/deep.html": '<html><a href="/more.html">more</a><img src="/leak.jpg"></html>',
+        f"{b}/more.html": "<html>more</html>",
+        "https://cdn.b.example/y.html": "<html>y</html>",
+    }
+    f = SiteFetcher(web)
+    # b is listed with follow: 0, which the API expresses as a seed already at the depth limit
+    counters, events, images = run_crawl(f, [(f"{a}/", "a.example", 0), (f"{b}/", "b.example", 2)], max_depth=2)
+    handoffs = [(e["from"], e["to"], e["url"]) for e in events if e["kind"] == "handoff"]
+    assert handoffs == [("a.example", "b.example", f"{b}/deep.html"), ("a.example", "b.example", "https://cdn.b.example/y.html")]
+    assert f"{b}/deep.html" in f.calls and "https://cdn.b.example/y.html" in f.calls and f"{b}/leak.jpg" in images
+    assert f"{b}/more.html" not in f.calls, "the receiving site keeps its own follow limit"
+    assert not any("stranger.example" in u for u in f.calls), "a site nobody listed is never crawled"
+
+
+def test_images_hidden_in_lazy_attributes_srcset_meta_and_styles_are_collected():
+    from bs4 import BeautifulSoup
+
+    from shield.crawl import _image_urls
+
+    html = (
+        '<meta property="og:image" content="https://cdn.w.org/share.jpg">'
+        '<img srcset="/s/small.jpg 320w, /s/large.jpg 1280w, /s/mid.jpg 640w">'
+        '<picture><source srcset="/p/a.webp 1x, /p/b.webp 2x"><img data-original="/lazy/o.jpg"></picture>'
+        '<img data-lazy-src="/lazy/l.jpg"><video poster="/v/poster.jpg" src="/v/film.mp4"></video>'
+        "<div style=\"background-image: url('/bg/hero.jpg')\"></div><img src=\"data:image/png;base64,AAAA\">"
+    )
+    assert set(_image_urls(BeautifulSoup(html, "html.parser"), "https://w.org/")) == {
+        "https://cdn.w.org/share.jpg", "https://w.org/s/large.jpg", "https://w.org/p/b.webp", "https://w.org/lazy/o.jpg",
+        "https://w.org/lazy/l.jpg", "https://w.org/v/poster.jpg", "https://w.org/bg/hero.jpg"}
+
+
+def test_content_links_are_read_before_menus_and_a_srcset_picture_is_fetched_once():
+    from bs4 import BeautifulSoup
+
+    from shield.crawl import _image_urls, _page_links
+
+    html = ('<header><a href="/home">home</a></header><nav><a href="/help">help</a></nav>'
+            '<div id="mw-panel"><a href="/portal">portal</a></div>'
+            '<main><a href="/leak-1">a</a><a href="/home">again</a><a href="/leak-2">b</a></main><footer><a href="/about">about</a></footer>'
+            '<img src="/t/250px.jpg" srcset="/t/500px.jpg 2x, /t/250px.jpg 1x">')
+    soup = BeautifulSoup(html, "html.parser")
+    assert _page_links(soup, "https://w.org/") == ["https://w.org/leak-1", "https://w.org/home", "https://w.org/leak-2",
+                                                   "https://w.org/help", "https://w.org/portal", "https://w.org/about"]
+    assert list(_image_urls(soup, "https://w.org/")) == ["https://w.org/t/500px.jpg"]

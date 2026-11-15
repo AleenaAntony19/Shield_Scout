@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -30,7 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from .. import llm, pdq, uploads, verify
+from .. import __version__, llm, pdq, uploads, verify
 from ..detect import UNVERIFIED, detect, labelled_ids, replacement, severity
 from ..ledger import Ledger
 from ..models import BASE, SFACE, YUNET, Entity
@@ -52,7 +53,7 @@ API_TOKEN = os.getenv("SHIELD_API_TOKEN", "")
 
 
 def is_public_demo() -> bool:
-    return os.getenv("SHIELD_PUBLIC_DEMO", "0").lower() in ("1", "true", "yes") or API_TOKEN in ("public", "demo")
+    return os.getenv("SHIELD_PUBLIC_DEMO", "0").lower() in ("1", "true", "yes")
 LOCAL_ONLY = os.getenv("SHIELD_LOCAL_ONLY") == "1"
 FACE_REGIONS = os.getenv("SHIELD_FACE_REGIONS", "1") == "1"
 
@@ -447,7 +448,7 @@ class ExplainRequest(BaseModel):
 # ---------- app ----------
 app = FastAPI(
     title="Shield·Scout API",
-    version="1.0.0",
+    version=__version__,
     description="Upload, analyse, redact and verify documents; discover candidate leaks. See docs/API.md.",
 )
 app.add_middleware(
@@ -468,6 +469,15 @@ def _session_value() -> str:
     return hashlib.sha256(API_TOKEN.encode()).hexdigest()
 
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _host_allowed(request: Request) -> bool:
+    """With no token the server is loopback-only, so any other name in Host is a web page using DNS rebinding to reach it."""
+    host = request.url.hostname or ""
+    return host in LOCAL_HOSTS or host in {h.strip() for h in os.getenv("SHIELD_ALLOWED_HOSTS", "").split(",")}
+
+
 def _authorized(request: Request) -> bool:
     return secrets.compare_digest(request.headers.get("authorization", ""), f"Bearer {API_TOKEN}") or secrets.compare_digest(
         request.cookies.get(SESSION_COOKIE, ""), _session_value())
@@ -483,6 +493,8 @@ async def guard(request: Request, call_next):
     if request.url.path.startswith("/mcp") and is_public_demo() and not (len(API_TOKEN) >= MIN_TOKEN_LENGTH and _authorized(request)):
         return JSONResponse({"detail": "MCP needs a SHIELD_API_TOKEN of 32+ characters, even in public demo mode"}, status_code=401)
     if request.url.path.startswith(("/api/", "/mcp")) and request.method != "OPTIONS":
+        if not API_TOKEN and not is_public_demo() and request.url.path != "/api/health" and not _host_allowed(request):
+            return JSONResponse({"detail": "unknown Host header: set SHIELD_ALLOWED_HOSTS, or protect the server with SHIELD_API_TOKEN"}, status_code=403)
         if not is_public_demo() and API_TOKEN and request.url.path not in ("/api/auth", "/api/health") and not _authorized(request):  # hosts probe health with no token
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         sweep()
@@ -509,11 +521,16 @@ def auth(body: AuthRequest, request: Request):
 
 def _host_facts() -> dict:
     """What a host's dashboard would show: which commit runs, peak memory, and the plan's limit."""
-    import resource
+    try:
+        import resource  # not available on Windows
 
+        # macOS reports bytes, Linux kilobytes
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // (1024 * 1024 if sys.platform == "darwin" else 1024)
+    except ImportError:
+        peak = None
     limit = Path("/sys/fs/cgroup/memory.max")
     raw = limit.read_text().strip() if limit.exists() else ""
-    return {"commit": os.getenv("RENDER_GIT_COMMIT", "")[:7], "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024,
+    return {"commit": os.getenv("RENDER_GIT_COMMIT", "")[:7], "peak_rss_mb": peak,
             "memory_limit_mb": int(raw) // 1048576 if raw.isdigit() else None}
 
 
@@ -552,6 +569,7 @@ def config():
         },
         "search_provider": provider.name,
         "llm": LLM_CFG.public(),
+        "llm_models": {name: spec["model"] for name, spec in llm.PROVIDERS.items()},  # each provider's default, for the UI
         "data_leaving_machine": egress,
         "enrolled": len(ENROLLED),
         "public_demo": is_public_demo(),
@@ -1071,7 +1089,7 @@ def _refuse_unsafe_bind(host: str) -> None:
         logging.info("Running in public demo mode: authentication guard bypassed for open evaluation.")
         return
     if len(API_TOKEN.strip()) < MIN_TOKEN_LENGTH:
-        raise SystemExit(f"Refusing to start: SHIELD_HOST={host!r} is not loopback and SHIELD_API_TOKEN is empty. Set a token or bind 127.0.0.1.")
+        raise SystemExit(f"Refusing to start: SHIELD_HOST={host!r} is not loopback and SHIELD_API_TOKEN is shorter than {MIN_TOKEN_LENGTH} characters. Generate one with `openssl rand -hex 32`, or bind 127.0.0.1.")
 
 
 def main() -> None:

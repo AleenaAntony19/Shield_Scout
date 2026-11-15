@@ -1,2 +1,2 @@
-__version__ = "0.1.0"
+__version__ = "1.0.0"  # one release number for the engine, API, web app and extension; tests/test_release.py checks they agree
 

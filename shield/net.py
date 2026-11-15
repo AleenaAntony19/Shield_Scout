@@ -10,7 +10,8 @@ import httpx
 
 from .models import FetchResult
 
-UA = "ShieldScoutBot/1.0 (+https://github.com/AleenaAntony19/TEAMCARTEL_VYUHAM26)"
+# Site owners read this to learn who is crawling them: set SHIELD_USER_AGENT to name your own contact page.
+UA = os.getenv("SHIELD_USER_AGENT") or "ShieldScoutBot/1.0 (+https://github.com/AleenaAntony19/Shield_Scout)"
 
 
 def ip_allowed(ip: str) -> bool:
