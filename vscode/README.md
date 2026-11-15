@@ -1,4 +1,4 @@
-# Shield·Code
+# Shield Code
 
 Find secrets, Indian PII, unsafe code, risky config and sensitive images or documents in your workspace. Review every fix before it is applied. Detection runs on your machine.
 
@@ -39,7 +39,7 @@ Bring your own key in the **AI Provider** panel. Keys stay in VS Code Secret Sto
 AI results are opinions, not verified matches. They can miss things, so they only add to the rule-based findings.
 
 ## Install (no Python needed)
-Search **Shield·Code** in the Extensions view of VSCodium, Cursor or Antigravity (Open VSX), or get the build for your OS from the [GitHub Releases](https://github.com/AleenaAntony19/Shield_Scout/releases) and run **Extensions: Install from VSIX…**. The build bundles the scanner engine, so nobody needs Python. OCR needs Tesseract: the Windows build includes it; on macOS/Linux install it (`brew install tesseract` / `apt install tesseract-ocr`), or OCR is reported as unavailable while everything else works.
+Search **Shield Code** in the Extensions view of VSCodium, Cursor or Antigravity (Open VSX), or get the build for your OS from the [GitHub Releases](https://github.com/AleenaAntony19/Shield_Scout/releases) and run **Extensions: Install from VSIX…**. The build bundles the scanner engine, so nobody needs Python. OCR needs Tesseract: the Windows build includes it; on macOS/Linux install it (`brew install tesseract` / `apt install tesseract-ocr`), or OCR is reported as unavailable while everything else works.
 
 
 **Developers** (no bundled engine): set `shieldCode.pythonPath` to a Python 3.11 with `requirements.txt`, and `shieldCode.enginePath` to the `shield_scout` folder. On Windows, leaving `pythonPath` empty uses the `py -3` launcher.

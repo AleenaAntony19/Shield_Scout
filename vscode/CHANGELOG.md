@@ -2,6 +2,7 @@
 
 ## 1.0.0
 First stable release. One version number now covers the extension, its bundled engine, the web app and the API.
+- Named **Shield Code**, with a plain space. The ID `aaron43210.shield-code` is unchanged.
 - **Shield: Run AI Agent Swarm on Workspace (MCP)** now appears in the Command Palette.
 - Windows: saving a file no longer leaves its old findings in the list.
 - SARIF export reports a failed scan instead of saying the file was written.

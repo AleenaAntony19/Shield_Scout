@@ -1,6 +1,6 @@
 {
   "name": "shield-code",
-  "displayName": "Shield\u00b7Code",
+  "displayName": "Shield Code",
   "description": "Scan a workspace for secrets, Indian PII, unsafe code, risky config and sensitive images/documents; review and apply safe fixes with a preview.",
   "version": "1.0.0",
   "publisher": "aaron43210",
@@ -92,7 +92,7 @@
       "activitybar": [
         {
           "id": "shieldCode",
-          "title": "Shield\u00b7Code",
+          "title": "Shield Code",
           "icon": "$(shield)"
         }
       ]
@@ -157,7 +157,7 @@
       ]
     },
     "configuration": {
-      "title": "Shield\u00b7Code",
+      "title": "Shield Code",
       "properties": {
         "shieldCode.pythonPath": {
           "type": "string",

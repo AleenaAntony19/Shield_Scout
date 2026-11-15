@@ -42,7 +42,7 @@ flowchart TD
         DISPATCH -->|DOCX| R_DOCX["lxml XML Node Purger & Run Joiner"]
         DISPATCH -->|XLSX| R_XLSX["openpyxl Cache & Hidden Sheet Stripper"]
         DISPATCH -->|Image| R_IMG["Pillow Pixel Sanitizer & EXIF Nullifier"]
-        DISPATCH -->|Code| R_CODE["Shield·Code AST Safe Replacer"]
+        DISPATCH -->|Code| R_CODE["Shield Code AST Safe Replacer"]
     end
 
     subgraph VERIFY["4. Adversarial Self-Verification Loop"]
