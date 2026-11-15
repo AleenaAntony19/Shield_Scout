@@ -5,7 +5,6 @@ import { runPython } from "./runner.ts";
 
 type Provider = "none" | "groq" | "anthropic";
 const KEY_ENV: Record<Exclude<Provider, "none">, string> = { groq: "GROQ_API_KEY", anthropic: "ANTHROPIC_API_KEY" };
-const DEFAULT_MODEL: Record<Exclude<Provider, "none">, string> = { groq: "openai/gpt-oss-20b", anthropic: "claude-haiku-5-5" };
 const secretId = (p: string) => `shieldCode.llmKey.${p}`;
 
 /** Env for `python -m shield.llm`, with the key from VS Code Secret Storage; null when not configured. */
@@ -22,7 +21,8 @@ export async function llmEnv(ctx: vscode.ExtensionContext): Promise<Record<strin
   if (provider === "none") return null;
   const key = await ctx.secrets.get(secretId(provider));
   if (!key) return null;
-  return { SHIELD_LLM_PROVIDER: provider, SHIELD_LLM_MODEL: model || DEFAULT_MODEL[provider], [KEY_ENV[provider]]: key };
+  // an empty model makes the engine use the provider default: the default lives in one place, shield/llm.py
+  return { SHIELD_LLM_PROVIDER: provider, SHIELD_LLM_MODEL: model, [KEY_ENV[provider]]: key };
 }
 
 // "AI Provider" sidebar panel: choose Groq or Claude, store the key in Secret Storage, test the connection.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shield-scout"
-version = "0.1.0"
+version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
     "pymupdf==1.28.2",
@@ -15,14 +15,11 @@ dependencies = [
     "pytesseract==0.3.13",
     "opencv-python==4.10.0.84",
     "numpy>=1.26",
-    "presidio-analyzer==2.2.366",
-    "spacy==3.8.14",
     "pdqhash==0.2.8",
     "httpx==0.28.1",
     "beautifulsoup4==4.14.3",
     "playwright==1.62.0",
     "PyYAML>=6",
-    "anthropic==1.17.0",
     "streamlit==1.56.0",
     "detect-secrets==1.5.0",
     "bandit==1.9.4",
@@ -44,4 +41,4 @@ where = ["."]
 include = ["shield*"]
 
 [project.scripts]
-shield = "shield.codescan.main:main"
+shield = "shield.codescan.__main__:main"

@@ -46,6 +46,8 @@ async def main():
     rep = next(e for e in events if e["kind"] == "done")["report"]["scout"]
     assert led.verify() is None, "ledger broken"
     assert rep["matches"], "expected PDQ matches on the mock web"
+    assert any("/archive/hidden.html" in m["page_url"] for m in rep["matches"]), "the page only the sitemap lists must be found"
+    assert rep["counters"]["pages_found"] == rep["counters"]["pages"] + rep["counters"]["robots_denied"], "every page found on the small mock site is read"
     print(f"scout: {len(rep['matches'])} matches, {rep['counters']}")
 
 asyncio.run(main())

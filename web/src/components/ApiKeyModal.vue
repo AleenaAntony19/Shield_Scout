@@ -19,7 +19,7 @@
           <label class="field-label mono">AI PROVIDER</label>
           <select class="field-input mono" v-model="form.provider">
             <option value="none">None (Local Deterministic Only)</option>
-            <option value="anthropic">Anthropic Claude (claude-haiku-5-5)</option>
+            <option value="anthropic">Anthropic Claude</option>
             <option value="groq">Groq (High-Speed LLM Inference)</option>
           </select>
         </div>
@@ -67,6 +67,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { ai, api } from '../api/index'
+import { config } from '../store/session'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false }
@@ -84,10 +85,10 @@ const statusMsg = ref('')
 const isError = ref(false)
 const loading = ref(false)
 
+// the server owns the defaults: a model name typed here would go stale when the provider retires it
 const defaultModelPlaceholder = computed(() => {
-  if (form.provider === 'anthropic') return 'claude-haiku-5-5 (default)'
-  if (form.provider === 'groq') return 'openai/gpt-oss-120b or qwen/qwen3.8-27b'
-  return 'default'
+  const model = config.value?.llm_models?.[form.provider]
+  return model ? `${model} (default)` : 'default'
 })
 
 watch(() => props.modelValue, (isOpen) => {

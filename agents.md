@@ -21,6 +21,13 @@ Enforced in code, not delegated:
 - **"Clean"** is the attack tool's real result.
 - Agents see masked values only. Tools take `finding_id`s, and raw values never leave the process.
 
+**Agents talk to each other** (`message_agent`, in `shield/agent_runtime.py`):
+- Any specialist, persona or optimizer can send a note to a named agent or to `all`. Example: StatutoryAuditor tells PragmaticDev which ids passed their checksum.
+- A note reaches its reader at the reader's next step. An agent that starts later finds it in `peer_notes`.
+- Round 1 runs in parallel, so a note can arrive after its reader has answered. That reader gets one **rebuttal turn** with its own answer and the note, and may revise.
+- Notes are masked like all agent text, limited to 280 characters, 3 per agent and 40 per run. They are claims, not orders: the safety floor and the grounded-keep rule still decide.
+- The run result lists every note in `messages`, and the web graph draws each one as a `TELLS` edge.
+
 **Bounds:** `max_steps` is 2–4 per agent; spawn depth is 1, with at most 4 children; at most 3 redact/attack cycles. Tool errors go back to the model instead of crashing the run. Rate-limit headers drive pacing.
 
 **Token use**, measured live on `demo/out/kyc.pdf` (12 findings) with Groq `openai/gpt-oss-20b`: 11,224 tokens, 12 LLM calls, 49 s, CLEAN. Before compaction it was 20,096 tokens. The breakdown per agent is in `result.agents[].tokens` and the web panel.

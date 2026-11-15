@@ -140,3 +140,28 @@ def test_public_demo_does_not_open_mcp(monkeypatch):
         monkeypatch.setattr(server, "API_TOKEN", "t" * 32)
         assert c.post("/mcp/", json={}).status_code == 401
         assert c.post("/mcp/", json={}, headers={"Authorization": "Bearer " + "t" * 32}).status_code != 401
+
+
+def test_tokenless_server_refuses_foreign_host_names(monkeypatch):
+    """DNS rebinding: a web page's own domain resolves to 127.0.0.1, so the browser sends that domain as Host."""
+    monkeypatch.setattr(server, "API_TOKEN", "")
+    monkeypatch.delenv("SHIELD_PUBLIC_DEMO", raising=False)
+    with TestClient(server.app) as c:
+        for host in ("evil.example", "evil.example:8000"):
+            assert c.get("/api/config", headers={"Host": host}).status_code == 403, host
+            assert c.post("/mcp/", json={}, headers={"Host": host}).status_code == 403, host
+        for host in ("localhost:8000", "127.0.0.1:8000", "[::1]:8000"):
+            assert c.get("/api/config", headers={"Host": host}).status_code == 200, host
+        assert c.get("/api/health", headers={"Host": "10.0.0.7"}).status_code == 200, "host probes use the pod address"
+        monkeypatch.setenv("SHIELD_ALLOWED_HOSTS", "shield.internal, other.internal")
+        assert c.get("/api/config", headers={"Host": "shield.internal"}).status_code == 200
+        monkeypatch.setattr(server, "API_TOKEN", "t" * 32)  # a token is the protection: the Host rule steps aside
+        assert c.get("/api/config", headers={"Host": "evil.example"}).status_code == 401
+
+
+def test_a_token_value_never_switches_auth_off(monkeypatch):
+    monkeypatch.delenv("SHIELD_PUBLIC_DEMO", raising=False)
+    for token in ("public", "demo"):
+        monkeypatch.setattr(server, "API_TOKEN", token)
+        assert not server.is_public_demo()
+        assert TestClient(server.app).get("/api/config").status_code == 401

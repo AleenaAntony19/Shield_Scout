@@ -40,12 +40,11 @@ args = [
     "--exclude-module", "psycopg_binary",
     "--exclude-module", "psycopg",
     "--exclude-module", "streamlit",
-    "--exclude-module", "spacy",
-    "--exclude-module", "presidio_analyzer",
     "--exclude-module", "playwright",
     "--exclude-module", "tkinter",
     "--exclude-module", "matplotlib",
 ]
+args += ["--add-data", f"{ROOT / 'vscode' / 'package.json'}{sep}."]  # `shield-engine --version` reads the extension version
 models = ROOT / "models"
 if any(models.glob("*.onnx")):
     args += ["--add-data", f"{models}{sep}models"]  # YuNet/SFace: shield.models.BASE resolves to the bundle root

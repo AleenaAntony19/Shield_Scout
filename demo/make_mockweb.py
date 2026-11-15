@@ -81,6 +81,7 @@ def build(out: str | Path = OUT):
     (out / "paste").mkdir()
     (out / "blog").mkdir()
     (out / "private").mkdir()
+    (out / "archive").mkdir()
 
     victim = _victim()
 
@@ -155,7 +156,10 @@ def build(out: str | Path = OUT):
         "<html><body><img src='../img/rot90.jpg'><p>Acme Corp</p></body></html>"
     )
     (out / "private" / "index.html").write_text("<html><body>private</body></html>")
-    (out / "robots.txt").write_text("User-agent: *\nDisallow: /private/\n")
+    # a corner no page links to: only the sitemap names it, with the image in a lazy attribute
+    (out / "archive" / "hidden.html").write_text("<html><body><img data-original='../img/bright.jpg'></body></html>")
+    (out / "sitemap.xml").write_text("<urlset><url><loc>http://127.0.0.1:8765/archive/hidden.html</loc></url></urlset>")
+    (out / "robots.txt").write_text("User-agent: *\nDisallow: /private/\nSitemap: http://127.0.0.1:8765/sitemap.xml\n")
 
     # leak bank
     bank = pdq.HashBank()

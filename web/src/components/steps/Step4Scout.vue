@@ -242,6 +242,9 @@ const crawlGap = computed(() => {
   if (c.blocked) gaps.push(`${c.blocked} page(s) were blocked`)
   if (c.robots_denied) gaps.push(`${c.robots_denied} page(s) disallowed by robots.txt`)
   if (c.timed_out || c.stopped === 'timeout') gaps.push('the crawl hit its time limit')
+  if (c.pages_failed) gaps.push(`${c.pages_failed} dead link(s)`)
+  const unread = (c.pages_found || 0) - c.pages - (c.blocked || 0) - (c.robots_denied || 0) - (c.pages_failed || 0)
+  if (unread > 0) gaps.push(`${unread} page(s) were found but not read (page budget, time limit or a blocked site; raise SHIELD_CRAWL_MAX_PAGES and SHIELD_CRAWL_TIMEOUT to read them)`)
   return gaps.length ? `Not fully checked: ${gaps.join(', ')}. No match means none found in what was read, not that the image is absent.` : ''
 })
 const agentTotal = computed(() => Object.keys(session.siteAgents).length)

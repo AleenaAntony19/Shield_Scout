@@ -21,3 +21,4 @@ Screenshot*.png
 .env
 vscode/engine/
 build/
+*.egg-info/

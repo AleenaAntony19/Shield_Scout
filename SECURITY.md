@@ -14,26 +14,31 @@
 | Confirming an image match | the page hostname | rdap.org |
 | Agent swarm run (opt-in) | masked findings, masked tool observations (OCR text is masked), agent prompts | Groq or Anthropic endpoint |
 | LLM provider configured and discovery run | org, domain, entity type names | same |
-| Search provider configured | firewall-approved query strings (org/domain + generic terms) | Brave or Google Programmable Search |
-| Discovery crawl requested | HTTP GETs to registry seed domains | those sites |
+| Search provider configured | firewall-approved query strings (org/domain + generic terms) | Brave, Google Programmable Search or Serper |
+| Discovery crawl requested | HTTP GETs to registry seed domains, pages you add and AI leads | those sites |
+| Opening the web app | the browser loads two fonts, so Google sees the visitor's IP address. No document data is sent | fonts.googleapis.com, fonts.gstatic.com |
 | Dependency audit | not implemented | n/a |
 
-`SHIELD_LOCAL_ONLY=1` disables every LLM and search call (the offline fixture provider is used). Nothing else makes network requests.
+`SHIELD_LOCAL_ONLY=1` disables every LLM and search call (the offline fixture provider is used). Nothing else on the server makes network requests. The web app's font download in the browser is the one request this switch does not control.
 
 ## Controls in code
 - **Uploads** ([shield/uploads.py](shield/uploads.py)): extension allowlist + magic bytes; size, PDF page, image pixel (decompression-bomb) and text length caps; Office zip member count, total size, compression ratio and path-traversal checks; encrypted PDFs rejected. Stored as `input<suffix>` in a per-job `mkdtemp` (0700) directory, never under the client filename.
 - **Retention**: job dirs are deleted on job delete, session clear, or after the TTL (`SHIELD_JOB_TTL_SECONDS`, swept on each request). Reference images are reduced to PDQ hashes and the pixels are discarded at once.
 - **Verification fails closed**: a check that cannot run is a FAIL; download is refused unless all checks pass.
 - **Logs**: job id, stage, status and duration only; exception *type* names only (messages may contain document text).
+- **Crawl scope**: the crawler follows links only inside a listed site and its subdomains. A link to an unlisted site is never fetched. Sitemap addresses pass the same robots.txt and private-network checks as any page.
 - **SSRF** ([shield/net.py](shield/net.py)): http/https only; every hop's host must resolve to global IPs; the *connected* peer IP is re-checked (DNS rebinding); ≤3 redirects; 5 MB body cap; robots.txt honoured; 403/429/CAPTCHA stop the domain. `SHIELD_ALLOW_LOCAL=1` (tests/demo only) allows loopback.
+- **Host check**: a server with no token and no public demo flag answers `/api` and `/mcp` only when the `Host` header is `localhost`, `127.0.0.1`, `::1` or a name in `SHIELD_ALLOWED_HOSTS`. This blocks DNS rebinding, where a web page points its own domain at 127.0.0.1 to read a local server. `/api/health` is exempt.
+- **Auth is never switched off by a token value**: only `SHIELD_PUBLIC_DEMO=1` opens the site.
 - **Discovery firewall**: no query may contain a detected personal value or a value from the linked analysis.
 - **Secrets**: LLM keys come from env or are set at runtime into process memory (web) / VS Code Secret Storage (extension). They are never echoed by the API, never logged, and are cleared by "Clear session data". `.githooks/pre-commit` (enable with `git config core.hooksPath .githooks`) blocks commits with secrets or Indian PII.
-- **Biometrics**: the web/API flow does face *region detection* only, to support opaque removal of photos. Face recognition vectors exist only in the opt-in Streamlit likeness demo (consent + selfie match, memory only).
+- **Biometrics**: document analysis does face *region detection* only, to support opaque removal of photos. Face recognition vectors exist only after an opt-in enrolment (`POST /api/v1/scout/enroll` or the Streamlit demo): consent plus a matching selfie, one int8 vector kept in memory, refused in public demo mode.
 
 ## Agent swarm guarantees
 - Tools address findings by id; raw values stay in the engine process.
 - AI deep scan is the one path that sends raw file text. Its model answers are untrusted: an item counts only if it quotes the text, it cannot rate itself critical, it can only add findings, and `.shield/cache/cognitive.json` keeps masked findings only (git-ignored by its own `.gitignore`).
 - The redaction tool enforces a floor that no LLM verdict can lower.
+- Notes between agents are masked before they are stored, logged or shown, and they are capped in length and number. A note is a claim the reader must check, so text copied from a document cannot order another agent to keep a value.
 - A "keep" must be grounded in a PragmaticDev challenge.
 - The workspace swarm writes code only through `refactor_code_secret`, which checks Python with `ast` and backs up the original first. The VS Code command asks for confirmation.
 - MCP file access is limited to `SHIELD_MCP_ROOT`.

@@ -33,7 +33,7 @@ def scripted(decide=None, log=None):
         body = json.loads(req.content)
         system, msgs = body["messages"][0]["content"], body["messages"][1:]
         task = json.loads(msgs[0]["content"])
-        tools = {t["function"]["name"] for t in body.get("tools", [])}
+        tools = {t["function"]["name"] for t in body.get("tools", [])} - {"message_agent"}  # this scripted model works alone
         done = msgs[-1]["role"] == "tool"
         findings = task.get("findings") or [{"id": i} for i in task.get("finding_ids", [])]
         ids = [f["id"] if isinstance(f, dict) else f for f in findings]
@@ -293,3 +293,104 @@ def test_keep_without_pragmatic_challenge_is_rejected(tmp_path, monkeypatch):
     assert next(e for e in events if e.get("event") == "binding_plan")["rejected_keeps"] == 1
     out = open(res["output"]).read()
     assert "98765 43210" not in out and "ravi.kumar@acme.in" not in out
+
+
+@pytest.mark.parametrize("when", ["mid_run", "after_answer"])
+def test_a_note_from_one_agent_changes_another_agents_answer(tmp_path, monkeypatch, when):
+    """StatutoryAuditor proves the Aadhaar and tells PragmaticDev, who wanted to keep it. Dev reads the note
+    during its run, or in a rebuttal turn when it had already answered, and drops the keep."""
+    import threading
+
+    monkeypatch.setenv("SHIELD_MCP_ROOT", str(tmp_path))
+    doc = tmp_path / "hr.txt"
+    doc.write_text("Aadhaar 2345 6789 0124\nmail ravi.kumar@acme.in\n")
+    sid = open_document(str(doc))["session_id"]
+    ids = {f["type"]: f["id"] for f in list_findings(sid)["findings"]}
+    aadhaar = ids["IN_AADHAAR"]
+    real = scripted()
+    note_sent, dev_answered, dev_requests = threading.Event(), threading.Event(), []
+
+    def opinions(keep=()):
+        return _reply(json.dumps({"opinions": [{"id": i, "stance": "keep" if i in keep else "redact", "reason": "x"} for i in ids.values()]}))
+
+    def handler(req):
+        body = json.loads(req.content)
+        system, msgs = body["messages"][0]["content"], body["messages"][1:]
+        text = json.dumps(msgs)
+        if "You are StatutoryAuditor" in system:
+            if len(msgs) == 1:
+                return _reply(calls=[("validate_checksum", {"finding_id": aadhaar})])
+            if "message_agent" not in text:
+                if when == "after_answer":
+                    assert dev_answered.wait(10)
+                return _reply(calls=[("message_agent", {"to": "PragmaticDev", "text": f"{aadhaar} passes Verhoeff: 2345 6789 0124 is a real number"})])
+            note_sent.set()
+            return opinions()
+        if "You are PragmaticDev" in system:
+            dev_requests.append(text)
+            if "passes Verhoeff" in text:
+                return opinions()
+            if len(msgs) == 1:
+                return _reply(calls=[("list_findings", {})])
+            if when == "mid_run":
+                assert note_sent.wait(10)  # hold this turn until the note is on the board; the next step must deliver it
+                return _reply(calls=[("list_findings", {})])
+            dev_answered.set()
+            return opinions(keep=[aadhaar])
+        return real.handle_request(req)
+
+    events = []
+    res = asyncio.run(run_agentic(sid, GROQ, events.append, httpx.MockTransport(handler)))
+
+    assert [(m["from"], m["to"]) for m in res["messages"]] == [("StatutoryAuditor", "PragmaticDev")]
+    assert "2345 6789 0124" not in json.dumps(res["messages"]) and "2345 6789 0124" not in json.dumps(events), "a note is masked like every other agent text"
+    assert any(e.get("event") == "message" and e["agent"] == "StatutoryAuditor" and e["to"] == "PragmaticDev" for e in events)
+    told = [r for r in dev_requests if "passes Verhoeff" in r]
+    assert told and ("PEER NOTES" in told[0]) == (when == "mid_run")
+    devs = [a for a in res["agents"] if a["name"] == "PragmaticDev"]
+    rebuttals = [e for e in events if e.get("event") == "round" and e.get("round") == "rebuttal"]
+    if when == "after_answer":
+        assert len(devs) == 2 and rebuttals[0]["agents"] == ["PragmaticDev"] and "your_opinions" in told[0] and "peer_notes" in told[0]
+    else:
+        assert len(devs) == 1 and not rebuttals, "the note was read in time: no second turn is spent"
+    assert all(d["action"] != "keep" for d in res["decisions"]) and "SwarmAdjudicator" not in {a["name"] for a in res["agents"]}
+    assert "2345 6789 0124" not in open(res["output"]).read() and res["clean"]
+
+
+def test_notes_are_addressed_masked_bounded_and_read_once(tmp_path):
+    from shield.agent_runtime import MAX_MESSAGES, MESSAGE_CHARS, AutonomousAgent
+
+    s = register_session(tmp_path / "x.txt", {"text": ""}, {}, tmp_path)
+    a, b = (AutonomousAgent(n, "", ["message_agent"], GROQ, s.id) for n in "AB")
+    wrong = a._send({"to": "Nobody", "text": "hello"})
+    assert "unknown agent" in wrong["error"] and "'B'" in wrong["error"]
+    assert "error" in a._send({"to": "B", "text": "  "})
+    assert a._send({"to": "B", "text": "card 4111 1111 1111 1111 seen " + "x" * 400}) == {"sent": True, "to": "B"}
+    note = s.board[0]["text"]
+    assert "4111 1111 1111 1111" not in note and len(note) <= MESSAGE_CHARS
+    assert a._send({"to": "all", "text": "layer two unreadable"})["sent"]
+    assert [n["from"] for n in b._inbox()] == ["A", "A"] and b._inbox() == [] and a._inbox() == [], "read once, and never your own"
+    for _ in range(MAX_MESSAGES - 2):
+        a._send({"to": "B", "text": "more"})
+    assert "limit" in a._send({"to": "B", "text": "one too many"})["error"]
+    mute = AutonomousAgent("C", "", [], GROQ, s.id)
+    assert "not permitted" in asyncio.run(mute._call("message_agent", {"to": "B", "text": "x"}))["error"]
+
+
+def test_claude_gets_a_peer_note_inside_the_tool_result_turn():
+    """Anthropic wants user and assistant turns to alternate, so a note after tool results joins that user turn."""
+    seen = []
+
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "{}"}], "usage": {}})
+
+    cfg = llm.configure(llm.LLMConfig(retries=0), provider="anthropic", api_key="test-key")
+    history = [{"role": "user", "content": "{}"},
+               {"role": "assistant", "text": "", "tool_calls": [{"id": "t1", "name": "list_findings", "args": {}}]},
+               {"role": "tool", "id": "t1", "name": "list_findings", "content": "{}"},
+               {"role": "user", "content": "PEER NOTES: x"}]
+    llm.chat_tools(cfg, "s", history, [], httpx.MockTransport(handler))
+    msgs = seen[0]["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
+    assert [b["type"] for b in msgs[-1]["content"]] == ["tool_result", "text"]

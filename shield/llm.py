@@ -274,7 +274,10 @@ def chat_tools(
         msgs = []
         for h in history:
             if h["role"] == "user":
-                msgs.append({"role": "user", "content": h["content"]})
+                if msgs and msgs[-1]["role"] == "user" and isinstance(msgs[-1]["content"], list):
+                    msgs[-1]["content"].append({"type": "text", "text": h["content"]})  # after tool results: same turn, roles keep alternating
+                else:
+                    msgs.append({"role": "user", "content": h["content"]})
             elif h["role"] == "assistant":
                 blocks = ([{"type": "text", "text": h["text"]}] if h.get("text") else []) + [
                     {"type": "tool_use", "id": c["id"], "name": c["name"], "input": c["args"]} for c in h.get("tool_calls", [])]

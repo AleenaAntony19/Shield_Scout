@@ -27,13 +27,21 @@ cp .env.example .env                              # optional: fill in only what 
 python -m shield.api                              # http://127.0.0.1:8000  (API docs: /docs)
 ```
 
-Development UI with hot reload: `cd web && npm run dev` (http://localhost:5173, proxies `/api` to port 8000).
+Development UI with hot reload: `cd web && npm run dev` (http://localhost:5173, proxies `/api` to port 8000; set `SHIELD_API_URL` if the API runs elsewhere).
 
 Run every check: `bash scripts/validate.sh`.
 
 Images inside documents: an uploaded PDF or Office file has each embedded image checked for faces and read with OCR, and a PDF linked from a crawled page has its images matched against your references.
 
 **Scope:** text search covers the open web through the search provider. Image matching runs on predefined sites, pages you add and AI leads, because hashing every image online needs far more compute than one server has. One code agent per site runs in parallel with no AI tokens. PDQ hashes are compact, so the matcher can scale out with more compute, but that scale has not been load tested.
+
+**Crawl coverage.** Each site agent reads its site as far as the limits allow:
+- it follows every link, frame and "next" link that stays on the site or its subdomains, and reads each page once;
+- it reads `robots.txt` and the site's sitemap, which reaches pages that no link leads to;
+- it collects images from `src`, lazy-load attributes, the largest `srcset` entry, `<picture>`, share images, video posters and inline background styles;
+- when it finds a link into another listed site, it hands that link to the agent of that site.
+
+The limits are `SHIELD_CRAWL_MAX_PAGES` (100), `SHIELD_CRAWL_MAX_DEPTH` (3), `SHIELD_CRAWL_TIMEOUT` (300 s) and `SHIELD_CRAWL_MAX_IMAGES_PER_PAGE` (30). Raise them for a deep scan of a large site. The result always reports what was not read: pages found but not fetched, dead links, blocked pages and pages that `robots.txt` disallows. Pages behind a login, pages built only by JavaScript and pages that `robots.txt` disallows are not read.
 
 Add your predefined sites to [registry/seeds.yaml](registry/seeds.yaml) (or point `SHIELD_REGISTRY` at your own file). A row with `follow: 0` scans only its listed pages. The registry ships with the local demo sites only. To try image matching, run `python demo/serve.py` and start the API with `SHIELD_ALLOW_LOCAL=1`; for real use, replace the seeds with sites you may crawl.
 
@@ -70,6 +78,7 @@ Queries are built from organisation/domain and entity *types* only (plus up to 4
 - the MetaPlanner spawns specialists;
 - PrivacyHawk, PragmaticDev and StatutoryAuditor debate in parallel;
 - FormatGuard or RefactorBot optimize the fix;
+- agents send each other notes (`message_agent`), and an agent that was written to after it answered gets one rebuttal turn;
 - the SwarmAdjudicator's plan is **executed**;
 - a red team attacks, with up to 3 replan cycles.
 
@@ -94,7 +103,7 @@ What is sent: finding type, rule, severity, confidence, layer and **masked** evi
 
 > ⚠️ Any API key that was ever pasted into a chat, ticket or commit is compromised: revoke and rotate it at the provider before using this tool. No key is stored in this repo; `.githooks/pre-commit` blocks commits that contain one.
 
-## Deploy (MVP)
+## Deploy
 
 One Docker container: the [Dockerfile](Dockerfile) builds the web UI, installs the engine and fetches the hash-pinned face models. Always start it with `python -m shield.api` (the image default): that entry point refuses a non-loopback bind when `SHIELD_API_TOKEN` is empty or `SHIELD_ALLOW_LOCAL=1`. Running `uvicorn` directly skips this check.
 
@@ -105,6 +114,11 @@ One Docker container: the [Dockerfile](Dockerfile) builds the web UI, installs t
 | `ANTHROPIC_API_KEY` | optional | Server key for team mode. Public demo mode never uses it. |
 | `SERPER_API_KEY` | optional | Live discovery search |
 | `PORT` | set by the host | Listen port, 8000 if unset. `SHIELD_PORT` wins if both are set. |
+| `SHIELD_REGISTRY` | for crawling | Your own list of sites you may crawl. The default lists the local demo sites only. |
+| `SHIELD_USER_AGENT` | for crawling | The crawler's User-Agent. Name a page where site owners can reach you. |
+| `SHIELD_ALLOWED_HOSTS` | rarely | Extra `Host` names for a server with no token. Without a token only `localhost`, `127.0.0.1` and `::1` are accepted, which stops a web page from reaching a local server through DNS rebinding. |
+
+Every setting is listed in [.env.example](.env.example).
 
 To use Vercel for the web app only, set the project root to `web`, put your Render URL in [web/vercel.json](web/vercel.json), and deploy. The API still runs on Render.
 
@@ -133,6 +147,12 @@ Limits:
 ## Privacy & safety
 
 See [SECURITY.md](SECURITY.md) for the threat model, the dev-only deployment assumptions and the exact list of data that can leave the machine. In short: local-only mode (`SHIELD_LOCAL_ONLY=1`) disables every remote LLM/search call; uploads live in per-job `0700` temp dirs deleted on job delete, session clear or TTL; logs record job id, stage and status only.
+
+## Versions and stability
+
+Version 1.0.0 is the first stable release; see [CHANGELOG.md](CHANGELOG.md). One version number covers the engine, the API, the web app and the extension, and `tests/test_release.py` fails if they disagree.
+
+Stable from 1.0.0: the `/api/v1` contract, the `shield` CLI flags, the MCP tool names and the extension's commands and settings. A breaking change to any of them needs a new major version. The web app and API are a single-team tool, not a multi-tenant service: read the limits under **Deploy**.
 
 ## Build, CI and release
 

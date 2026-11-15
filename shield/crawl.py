@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import os
 import re
 import time
+import zlib
 from collections.abc import KeysView
 from dataclasses import dataclass, replace
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -14,10 +16,16 @@ from .models import ImageRef
 
 
 MIN_IMAGE_WIDTH = 64  # the matcher ignores anything smaller
-MAX_IMAGES_PER_PAGE = 30  # shortcut: a long article's later images go unchecked and are counted, raise it with more compute
+# shortcut: a long article's later images go unchecked and are counted, raise it with more compute
+MAX_IMAGES_PER_PAGE = int(os.getenv("SHIELD_CRAWL_MAX_IMAGES_PER_PAGE", "30"))
 RETRYABLE = {"http_403", "http_429"}
 RETRY_WAIT = 5.0
 IMAGE_RPS = 3.0  # images were unpaced: real sites answer a burst with 403, and the match is then silently lost
+MAX_SITEMAPS = 10  # sitemap files read per site: an index can list hundreds
+MAX_SITEMAP_PAGES = 5000
+IMAGE_LINK = re.compile(r"\.(jpg|jpeg|png|webp|gif|bmp|pdf)(\?|$)", re.I)
+# files that are never a page with images on it: fetching them only spends the page budget
+NOT_A_PAGE = re.compile(r"\.(css|js|json|xml|rss|atom|zip|gz|tar|7z|rar|exe|dmg|apk|mp3|mp4|avi|mov|webm|woff2?|ttf|ico|svg|docx?|xlsx?|pptx?|csv|txt)(\?|$)", re.I)
 
 
 @dataclass
@@ -55,23 +63,82 @@ def _abs(base: str, href: str) -> str:
     return urljoin(base, href)
 
 
+def _largest(srcset: str) -> str:
+    """The biggest candidate of a srcset: the first is often a thumbnail too small to match."""
+    best, size = "", -1.0
+    for part in srcset.split(","):
+        bits = part.split()
+        if not bits:
+            continue
+        try:
+            n = float(bits[1][:-1]) if len(bits) > 1 else 0.0
+        except ValueError:
+            n = 0.0
+        if n > size:
+            best, size = bits[0], n
+    return best
+
+
 def _image_urls(soup: BeautifulSoup, base: str) -> KeysView[str]:
     out: dict[str, None] = {}  # keeps page order: the main image comes early, and the per-page cap must not cut it
-    for tag in soup.select("img"):
+    for tag in soup.select("img, picture source, video[poster]"):
         if str(tag.get("width", "")).isdigit() and int(tag["width"]) < MIN_IMAGE_WIDTH:
             continue  # icons and flags: never a match, and each one costs a rate-limited fetch
-        for attr in ("src", "data-src", "srcset"):
+        # lazy loaders keep the real address in a data attribute until the page scrolls
+        attrs = ("poster",) if tag.name == "video" else ("src", "data-src", "data-lazy-src", "data-original", "srcset", "data-srcset")
+        if tag.get("srcset") or tag.get("data-srcset"):
+            attrs = ("srcset", "data-srcset")  # src is a smaller copy of the same picture: one fetch, the largest, is enough
+        for attr in attrs:
             value = tag.get(attr)
             if not value:
                 continue
-            if attr == "srcset":
-                value = value.split(",")[0].strip().split(" ")[0]
+            out[_abs(base, _largest(value) if attr.endswith("srcset") else value)] = None
+    for tag in soup.select('meta[property="og:image"], meta[name="twitter:image"], link[rel~=image_src]'):
+        value = tag.get("content") or tag.get("href")  # the share image: often the only full-size copy on the page
+        if value:
+            out[_abs(base, value)] = None
+    for tag in soup.select('[style*="url("]'):
+        for value in re.findall(r"url\(\s*['\"]?([^'\")]+)", tag["style"]):
             out[_abs(base, value)] = None
     for a in soup.select("a[href]"):
         href = _abs(base, a["href"])
-        if re.search(r"\.(jpg|jpeg|png|webp|gif|bmp|pdf)(\?|$)", href, re.I) and not re.search(r"/wiki/[^/]+:", href):  # a wiki file page in any language, not an image
+        if IMAGE_LINK.search(href) and not re.search(r"/wiki/[^/]+:", href):  # a wiki file page in any language, not an image
             out[href] = None
-    return {u: None for u in out if not re.search(r"\.svg(\?|$)", u, re.I)}.keys()  # vector icons cannot be hashed
+    # vector icons cannot be hashed, and only http(s) can be fetched
+    return {u: None for u in out if u.startswith(("http://", "https://")) and not re.search(r"\.svg(\?|$)", u, re.I)}.keys()
+
+
+# menus, headers and footers: the same links on every page of a site (MediaWiki marks its own with these ids)
+CHROME = ["nav", "header", "footer", "aside", "[role=navigation]", "[role=banner]", "[role=contentinfo]",
+          "#mw-panel", "#mw-navigation", "#mw-head", "#footer", "#sidebar"]
+LINK_TAGS = "a[href], area[href], iframe[src], frame[src], link[rel~=next][href]"
+
+
+def _page_links(soup: BeautifulSoup, base: str) -> list[str]:
+    """Every address on the page that can itself be a page. #a and #b of one page are one page.
+    Links in the page's own content come before menu, header and footer links: under a page budget, the
+    content is where a leaked copy sits, and every page repeats the same menu."""
+    content: dict[str, None] = {}
+    chrome: dict[str, None] = {}
+    in_chrome = {id(t) for t in soup.select(", ".join(f"{c} {t}" for c in CHROME for t in LINK_TAGS.split(", ")))}
+    for tag in soup.select(LINK_TAGS):
+        url = urldefrag(_abs(base, tag.get("href") or tag.get("src"))).url
+        if url.startswith(("http://", "https://")) and not IMAGE_LINK.search(url) and not NOT_A_PAGE.search(url):
+            (chrome if id(tag) in in_chrome else content)[url] = None
+    return list(content) + [u for u in chrome if u not in content]
+
+
+def _within(host: str, domain: str) -> bool:
+    return bool(domain) and (host == domain or host.endswith("." + domain))
+
+
+def _sitemap_text(body: bytes) -> str:
+    if body[:2] == b"\x1f\x8b":  # sitemap.xml.gz; the cap stops a decompression bomb
+        try:
+            body = zlib.decompressobj(31).decompress(body, 20 * 1024 * 1024)
+        except zlib.error:
+            return ""
+    return body.decode("utf-8", "ignore")
 
 
 class Scheduler:
@@ -89,20 +156,34 @@ class Scheduler:
         self.pending = 0
         self.seq = 0
         self.blocked: set[str] = set()
-        self.counters = {"pages": 0, "images": 0, "blocked": 0, "robots_denied": 0}
+        # pages_found minus pages is what the crawl knew about and did not read
+        self.counters = {"pages": 0, "images": 0, "blocked": 0, "robots_denied": 0, "pages_found": 0}
         self._last: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._done = asyncio.Event()
+        self._seen: set[tuple[str, str, str]] = set()
+        self._fetching = 0  # page fetches in flight: they count toward the budget before they land
+        self._sitemapped: set[str] = set()
+        self._home: dict[str, tuple[str, int, str]] = {}  # domain -> (site agent, its seed depth, category)
 
     def push(self, tier: int, risk: float, job: Job):
-        if self.counters["pages"] >= self.budget_pages:
-            return
+        job.site = job.site or job.domain or urlparse(job.url).netloc
+        if not job.retries:  # a retry is the same job again, not a new find
+            key = (job.kind, urldefrag(job.url).url, job.page_url if job.kind == "image" else "")
+            if key in self._seen:
+                return  # pages link back to each other: without this a loop eats the whole page budget
+            self._seen.add(key)
+            if job.kind == "page":
+                self.counters["pages_found"] += 1
+                if job.domain:
+                    self._home.setdefault(job.domain, (job.site, job.depth, job.seed_category))
+        if job.kind == "page" and self.counters["pages"] >= self.budget_pages:
+            return  # images are never refused here: the last page inside the budget still gets its images checked
         job.tier = tier
         job.risk = risk
         job.seq = self.seq
         self.seq += 1
         self.pending += 1
-        job.site = job.site or job.domain or urlparse(job.url).netloc
         self.sites.setdefault(job.site, asyncio.PriorityQueue()).put_nowait((tier, -risk, job.seq, job))
         self._spawn(job.site)
 
@@ -121,13 +202,39 @@ class Scheduler:
                 await asyncio.sleep(wait)
             self._last[domain] = time.monotonic()
 
+    async def _sitemap_pages(self, job: Job, domain: str, fetcher, on_event) -> list[str]:
+        """Pages the site lists about itself: a sitemap reaches corners that no link read so far leads to."""
+        root = "{0.scheme}://{0.netloc}".format(urlparse(job.url))
+        pages: dict[str, None] = {}
+        try:
+            await self._pace(domain)
+            robots = await fetcher.get(root + "/robots.txt")
+            todo = [u.decode("ascii", "ignore") for u in re.findall(rb"(?im)^\s*sitemap:\s*(\S+)", robots.body or b"")] or [root + "/sitemap.xml"]
+            for _ in range(MAX_SITEMAPS):
+                if not todo or len(pages) >= MAX_SITEMAP_PAGES:
+                    break
+                await self._pace(domain)
+                res = await fetcher.get(todo.pop(0))  # the fetcher applies robots.txt and the private-network guard
+                if res.blocked_reason or res.status != 200:
+                    continue
+                text = _sitemap_text(res.body)
+                locs = [html.unescape(u) for u in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text)]
+                if "<sitemapindex" in text:
+                    todo += locs
+                else:
+                    pages.update(dict.fromkeys(locs))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass  # a broken sitemap must not cost the links already found on the page
+        if pages:
+            await on_event({"kind": "sitemap", "url": root + "/", "site": job.site, "found": len(pages)})
+        return list(pages)[:MAX_SITEMAP_PAGES]
+
     async def _process(self, job: Job, fetcher, on_image, on_event):
         domain = job.domain or (urlparse(job.url).netloc.split(":")[0])
         stats = self.site_stats.setdefault(job.site, {"pages": 0, "images": 0})
         if job.site in self.blocked:
-            self.pending -= 1
-            if self.pending <= 0:
-                self._done.set()
             return
 
         if job.kind == "image":
@@ -137,22 +244,22 @@ class Scheduler:
                 self._images_paced.add(job.url)
                 await self._pace(urlparse(job.url).netloc, self.image_gap)
             async with self.sem:
-                    await on_image(ImageRef(job.page_url or job.url, job.url, domain))
-            self.pending -= 1
-            if self.pending <= 0:
-                self._done.set()
+                await on_image(ImageRef(job.page_url or job.url, job.url, domain))
             return
 
-        await self._pace(domain)
-        async with self.sem:
-            res = await fetcher.get(job.url)
+        if self.counters["pages"] + self._fetching >= self.budget_pages:
+            return  # found, but past the page budget: it stays in pages_found so the report shows the gap
+        self._fetching += 1
+        try:
+            await self._pace(domain)
+            async with self.sem:
+                res = await fetcher.get(job.url)
+        finally:
+            self._fetching -= 1
 
         if res.blocked_reason in RETRYABLE and job.retries < 1:  # often a rate limit, not a ban: back off once before giving up on the site
             await asyncio.sleep(RETRY_WAIT)
             self.push(job.tier, job.risk, replace(job, retries=job.retries + 1))
-            self.pending -= 1
-            if self.pending <= 0:  # at the page budget the push is refused, and nothing else would end the run
-                self._done.set()
             return
         if res.blocked_reason:
             if res.blocked_reason == "robots":
@@ -162,16 +269,15 @@ class Scheduler:
                 self.counters["blocked"] += 1
                 self.blocked.add(job.site)  # the site, not the host: one refused section must not stop the rest of a host
                 await on_event({"kind": "blocked", "url": job.url, "reason": res.blocked_reason})
-            self.pending -= 1
-            if self.pending <= 0:
-                self._done.set()
             return
 
         if res.body[:5] == b"%PDF-":  # a page URL that is really a PDF: its embedded images go to the matcher
             self.push(job.tier, job.risk, replace(job, kind="image", page_url=job.url))
-            self.pending -= 1
-            if self.pending <= 0:
-                self._done.set()
+            self.counters["pages_found"] -= 1  # it was a document, not a page left unread
+            return
+        if not 200 <= res.status < 300:  # a dead link or a failed connection is not a page that was read
+            self.counters["pages_failed"] = self.counters.get("pages_failed", 0) + 1
+            await on_event({"kind": "crawl_error", "url": job.url, "error": f"HTTP {res.status}" if res.status else "no response"})
             return
         self.counters["pages"] += 1
         stats["pages"] += 1
@@ -179,37 +285,33 @@ class Scheduler:
 
         soup = BeautifulSoup(res.body, "html.parser")
         kind = classify(soup, job.seed_category)
-
-        next_urls: list[str] = []
-
-        if kind == "gallery":
-            refs = await _gallery_refs(job.url, fetcher, soup)
-        elif kind == "forum":
-            refs = _image_urls(soup, job.url)
-            next_urls = _forum_next(soup, job.url)
-        elif kind == "directory":
-            refs = {_abs(job.url, img["src"]) for img in soup.select("div.card img[src]")}
-        else:
-            refs = _image_urls(soup, job.url)
-            for a in soup.select("a[href]")[:20]:
-                href = _abs(job.url, a["href"])
-                if urlparse(href).netloc == urlparse(job.url).netloc:
-                    next_urls.append(href)
-
+        refs = await _gallery_refs(job.url, fetcher, soup) if kind == "gallery" else _image_urls(soup, job.url)
         if kind == "default" and len(refs) > MAX_IMAGES_PER_PAGE:
             self.counters["images_skipped"] = self.counters.get("images_skipped", 0) + len(refs) - MAX_IMAGES_PER_PAGE
             refs = list(refs)[:MAX_IMAGES_PER_PAGE]
         for ref in refs if kind == "default" else sorted(refs):
             self.push(job.tier, job.risk, Job(ref, "image", job.depth, domain, job.url, job.seed_category, site=job.site))
 
-        if job.depth < self.max_depth:
-            for nxt in next_urls:
-                if urlparse(nxt).netloc == urlparse(job.url).netloc:
-                    self.push(job.tier, job.risk, Job(nxt, "page", job.depth + 1, domain, job.url, job.seed_category, site=job.site))
-
-        self.pending -= 1
-        if self.pending <= 0:
-            self._done.set()
+        if job.depth >= self.max_depth:
+            return
+        links = _page_links(soup, job.url)
+        netloc = urlparse(job.url).netloc
+        if netloc not in self._sitemapped:
+            self._sitemapped.add(netloc)
+            links += await self._sitemap_pages(job, domain, fetcher, on_event)
+        for url in links:
+            host = urlparse(url).hostname or ""
+            if urlparse(url).netloc == netloc or _within(host, domain):
+                self.push(job.tier, job.risk, Job(url, "page", job.depth + 1, domain, job.url, job.seed_category, site=job.site))
+                continue
+            # a link into another watched site: tell that site's agent, which reads it under its own follow limit
+            home = next((d for d in self._home if _within(host, d)), None)
+            if home and self._home[home][0] != job.site:
+                site, seed_depth, category = self._home[home]
+                known = len(self._seen)
+                self.push(job.tier, job.risk, Job(url, "page", seed_depth + 1, home, job.url, category, site=site))
+                if len(self._seen) > known:
+                    await on_event({"kind": "handoff", "from": job.site, "to": site, "url": url})
 
     async def _site_agent(self, site: str):
         fetcher, on_image, on_event = self._ctx
@@ -223,6 +325,7 @@ class Scheduler:
                 raise
             except Exception as exc:
                 await on_event({"kind": "crawl_error", "url": job.url, "error": str(exc)})
+            finally:  # one place: every way a job ends must count, or the run never finishes
                 self.pending -= 1
                 if self.pending <= 0:
                     self._done.set()
@@ -244,16 +347,6 @@ class Scheduler:
                 a.cancel()
             await asyncio.gather(*agents, return_exceptions=True)
         return dict(self.counters)
-
-
-def _forum_next(soup: BeautifulSoup, base: str) -> list[str]:
-    out = []
-    for a in soup.select("a[href]"):
-        rel = " ".join(a.get("rel", [])).lower()
-        text = (a.get_text() or "").strip().lower()
-        if rel == "next" or text in {"next", "›", "»", "older", "aage"}:
-            out.append(_abs(base, a["href"]))
-    return out
 
 
 async def _gallery_refs(url: str, fetcher, soup: BeautifulSoup) -> set[str]:

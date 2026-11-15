@@ -30,7 +30,7 @@ The unversioned `/api/*` routes used by the bundled web app are documented in [d
 - **Streamable HTTP**: `POST /mcp/` on the API (stateless JSON responses). It needs `SHIELD_API_TOKEN` when that is set.
 - **Tools**: `open_document`, `list_findings`, `validate_checksum`, `extract_ocr_region`, `compute_perceptual_pdq`, `compute_pca_projection`, `measure_layout`, `execute_destructive_redaction`, `adversarial_penetration_test`, `open_workspace`, `list_code_findings`, `refactor_code_secret`, `rescan_workspace`, `run_agent_swarm`. In-process agents also get `spawn_specialist_agent`.
 - **Resources**: `shield://doc/{id}/metadata`, `shield://doc/{id}/layers` (masked), `shield://ledger/{job_id}/chain`.
-- **Swarm over HTTP**: `POST /api/v1/swarm/run {job_id}` starts the run; `GET /api/v1/swarm/events?job_id=` streams it as SSE (spawns, tool calls with masked observations, binding plan, end with token totals). Every tool call is chained into the job's SHA-256 ledger.
+- **Swarm over HTTP**: `POST /api/v1/swarm/run {job_id}` starts the run; `GET /api/v1/swarm/events?job_id=` streams it as SSE (spawns, tool calls with masked observations, notes between agents, binding plan, end with token totals and the `messages` list). Every tool call is chained into the job's SHA-256 ledger.
 
 ## VS Code ⇄ engine
 - Scan: `python -m shield.codescan scan <root> --format json --workers N --timeout S [--no-ocr] [--exclude G] [--files F…]`. Exit 0 means clean, 1 means critical/high findings; any other code is an error.

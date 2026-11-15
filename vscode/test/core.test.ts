@@ -40,7 +40,7 @@ test("debounce collapses bursts", async () => {
   assert.equal(n, 1);
 });
 
-import { explainStartFailure, resolveEngine } from "../src/core.ts";
+import { explainStartFailure, posixPath, resolveEngine } from "../src/core.ts";
 
 test("engine resolution: bundled binary, explicit python, Windows py launcher", () => {
   const scan = ["-m", "shield.codescan", "scan", "/w"];
@@ -50,4 +50,21 @@ test("engine resolution: bundled binary, explicit python, Windows py launcher", 
   assert.deepEqual(resolveEngine(scan, { bundled: "/e/x", pythonPath: "/py", platform: "linux" }).command, "/py"); // explicit setting wins
   assert.deepEqual(resolveEngine(scan, { bundled: null, pythonPath: "", platform: "win32" }), { command: "py", args: ["-3", ...scan] });
   assert.match(explainStartFailure("Python was not found; run without arguments to install from the Microsoft Store", "win32"), /Windows build/);
+});
+
+test("posixPath: a Windows relative path matches the engine's file names", () => {
+  assert.equal(posixPath("src\\app\\keys.py"), "src/app/keys.py");
+  assert.equal(posixPath("src/app/keys.py"), "src/app/keys.py");
+});
+
+import { readFileSync } from "node:fs";
+
+test("every registered command is declared in package.json, or nobody can run it", () => {
+  const src = readFileSync(new URL("../src/extension.ts", import.meta.url), "utf8");
+  const registered = [...src.matchAll(/registerCommand\("(shieldCode\.[\w.]+)"/g)].map((m) => m[1]);
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const declared: string[] = manifest.contributes.commands.map((c: { command: string }) => c.command);
+  assert.ok(registered.length >= 10, "the pattern still finds the registrations");
+  assert.deepEqual(registered.filter((c) => !declared.includes(c)), []);
+  assert.deepEqual(declared.filter((c) => !registered.includes(c)), []);
 });
